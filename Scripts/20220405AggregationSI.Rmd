@@ -1,0 +1,1150 @@
+---
+title: ' Supporting information for Aggregation of symbionts on their hosts depends on interaction type and host characteristics '
+author:
+- David R. Clark
+- Kyle A. Young
+- Justin Kitzes
+- Pippa J. Moore
+- Jessica Stephenson
+date: "2/22/2022"
+output:
+  pdf_document:
+    toc: yes
+    number_sections: yes
+  editor_options:
+    chunk_output_type: console
+  word_document:
+    toc: yes
+header-includes:
+- \usepackage{caption}
+- \captionsetup[figure]{labelformat=empty}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# Set so that long lines in R will be wrapped:
+knitr::opts_chunk$set(tidy.opts=list(width.cutoff=70), tidy=TRUE)
+
+```
+
+```{r HIGHSTATLIB, include=FALSE}
+corvif <- function(dataz) {
+  dataz <- as.data.frame(dataz)
+  #correlation part
+  #cat("Correlations of the variables\n\n")
+  #tmp_cor <- cor(dataz,use="complete.obs")
+  #print(tmp_cor)
+  
+  #vif part
+  form    <- formula(paste("fooy ~ ",paste(strsplit(names(dataz)," "),collapse=" + ")))
+  dataz   <- data.frame(fooy=1,dataz)
+  lm_mod  <- lm(form,dataz)
+  
+  cat("\n\nVariance inflation factors\n\n")
+  print(myvif(lm_mod))
+}
+
+
+#Support function for corvif. Will not be called by the user
+myvif <- function(mod) {
+  v <- vcov(mod)
+  assign <- attributes(model.matrix(mod))$assign
+  if (names(coefficients(mod)[1]) == "(Intercept)") {
+    v <- v[-1, -1]
+    assign <- assign[-1]
+  } else warning("No intercept: vifs may not be sensible.")
+  terms <- labels(terms(mod))
+  n.terms <- length(terms)
+  if (n.terms < 2) stop("The model contains fewer than 2 terms")
+  if (length(assign) > dim(v)[1] ) {
+    diag(tmp_cor)<-0
+    if (any(tmp_cor==1.0)){
+      return("Sample size is too small, 100% collinearity is present")
+    } else {
+      return("Sample size is too small")
+    }
+  }
+  R <- cov2cor(v)
+  detR <- det(R)
+  result <- matrix(0, n.terms, 3)
+  rownames(result) <- terms
+  colnames(result) <- c("GVIF", "Df", "GVIF^(1/2Df)")
+  for (term in 1:n.terms) {
+    subs <- which(assign == term)
+    result[term, 1] <- det(as.matrix(R[subs, subs])) * det(as.matrix(R[-subs, -subs])) / detR
+    result[term, 2] <- length(subs)
+  }
+  if (all(result[, 2] == 1)) {
+    result <- data.frame(GVIF=result[, 1])
+  } else {
+    result[, 3] <- result[, 1]^(1/(2 * result[, 2]))
+  }
+  invisible(result)
+}
+#END VIF FUNCTIONS
+
+
+
+
+
+##################################################################
+##################################################################
+#Here are some functions that we took from the pairs help file and
+#modified, or wrote ourselves. To cite these, use the r citation: citation()
+
+panel.cor <- function(x, y, digits=1, prefix="", cex.cor = 6)
+{
+  usr <- par("usr"); on.exit(par(usr))
+  par(usr = c(0, 1, 0, 1))
+  r1=cor(x,y,use="pairwise.complete.obs")
+  r <- abs(cor(x, y,use="pairwise.complete.obs"))
+  txt <- format(c(r1, 0.123456789), digits=digits)[1]
+  txt <- paste(prefix, txt, sep="")
+  if(missing(cex.cor)) { cex <- 0.9/strwidth(txt) } else {
+     cex = cex.cor}
+  text(0.5, 0.5, txt, cex = cex * r)
+}
+
+##################################################################
+panel.smooth2=function (x, y, col = par("col"), bg = NA, pch = par("pch"),
+                        cex = 1, col.smooth = "black", span = 2/3, iter = 3, ...)
+{
+  points(x, y, pch = pch, col = col, bg = bg, cex = cex)
+  ok <- is.finite(x) & is.finite(y)
+  if (any(ok))
+    lines(stats::lowess(x[ok], y[ok], f = span, iter = iter),
+          col = 1, ...)
+}
+
+##################################################################
+panel.lines2=function (x, y, col = par("col"), bg = NA, pch = par("pch"),
+                       cex = 1, ...)
+{
+  points(x, y, pch = pch, col = col, bg = bg, cex = cex)
+  ok <- is.finite(x) & is.finite(y)
+  if (any(ok)){
+    tmp=lm(y[ok]~x[ok])
+    abline(tmp)}
+}
+
+##################################################################
+panel.hist <- function(x, ...)
+{
+  usr <- par("usr"); on.exit(par(usr))
+  par(usr = c(usr[1:2], 0, 1.5) )
+  h <- hist(x, plot = FALSE)
+  breaks <- h$breaks; nB <- length(breaks)
+  y <- h$counts; y <- y/max(y)
+  rect(breaks[-nB], 0, breaks[-1], y, col="white", ...)
+}
+##################################################################
+##################################################################
+
+
+
+##################################################################
+##################################################################
+#Functions for variograms
+#To cite these functions, use:
+#Mixed effects models and extensions in ecology with R. (2009).
+#Zuur, AF, Ieno, EN, Walker, N, Saveliev, AA, and Smith, GM. Springer.
+#Make a variogram for one variable
+#To use, type:  MyVariogram(XUTM, YUTM, E , MyDistance=10)
+# XUTM is x coordinates
+# XUTM is y coordinates
+# E is variable used in sample variogram
+# MyDistance is the cutoff value for the distances
+
+MyVariogram <- function(x,y,z, MyDistance) {
+  library(gstat)
+  mydata      <- data.frame(z, x, y)
+  coordinates(mydata)    <- c("x", "y")  
+  Var <- variogram(z ~ 1, mydata, cutoff = MyDistance)
+  data.frame(Var$np, Var$dist, Var$gamma)
+}
+
+#Function for making multiple variograms in an xyplot
+#To use, type:  MultiVariogram(Z, MyVar,XUTM, YUTM, MyDistance=10)
+# Z is a data frame with all the data 
+# Character string with variable names that will be used in the xyplot
+# XUTM is x coordinates
+# XUTM is y coordinates
+# MyDistance is the cutoff value for the distances
+
+MultiVariogram <- function(Z, MyVar, x, y, MyDistance) {
+  #Z is the data frame with data
+  #MyVar is a list of variables for for which variograms are calculated
+  #x, y: spatial coordinates
+  #MyDistance: limit for distances in the variogram
+  
+  library(lattice)
+  VarAll<- c(NA,NA,NA,NA)
+  for (i in MyVar){
+    vi <- MyVariogram(x,y,Z[,i], MyDistance)
+    vii <- cbind(vi, i)
+    VarAll <- rbind(VarAll,vii)
+  }
+  VarAll <- VarAll[-1,]
+  
+  P <- xyplot(Var.gamma ~ Var.dist | factor(i), col = 1, type = "p", pch = 16,
+              data = VarAll,
+              xlab = "Distance",
+              ylab = "Semi-variogram",
+              strip = function(bg='white', ...)
+                strip.default(bg='white', ...),
+              scales = list(alternating = T,
+                            x = list(relation = "same"),
+                            y = list(relation = "same"))
+              )
+  
+  print(P)
+}
+#End variogram code
+##########################################################
+
+#Function for multi-panel Cleveland dotplot.
+#The input file must contain no categorical variables
+Mydotplot <- function(DataSelected){
+
+P <- dotplot(as.matrix(as.matrix(DataSelected)),
+          groups=FALSE,
+          strip = strip.custom(bg = 'white',
+                               par.strip.text = list(cex = 1.2)),
+          scales = list(x = list(relation = "free", draw = TRUE),
+                        y = list(relation = "free", draw = FALSE)),
+          col=1, cex  = 0.5, pch = 16,
+          xlab = list(label = "Value of the variable", cex = 1.5),
+          ylab = list(label = "Order of the data from text file", cex = 1.5))
+  
+print(P)  
+  }
+
+
+#Add more code here:
+
+
+Mybwplot <- function(Z, MyVar, TargetVar){
+#Multipanel boxplots
+#Z: data set
+#MyVar: character string
+#TargetVar: variable for the x-axis..must be a factor
+  
+  AllY <- as.vector(as.matrix(Z[,MyVar]))
+  AllX <- rep(Z[,TargetVar], length(MyVar))
+  ID <- rep(MyVar, each = nrow(Z))
+  
+P <- bwplot(AllY ~ factor(AllX) | ID, horizontal = FALSE,
+         ylab = "", xlab = "",
+         scales = list(alternating = T,cex.lab = 1.5,
+                       x = list(relation = "same",rot =90, abbreviate = TRUE, cex = 1.5),
+                       y = list(relation = "free", draw = FALSE)),
+         strip = strip.custom(bg = 'white',
+                              par.strip.text = list(cex = 1.2)),
+         cex = .5,
+         par.settings = list(
+           box.rectangle = list(col = 1),
+           box.umbrella  = list(col = 1),
+           plot.symbol   = list(cex = .5, col = 1)))
+print(P)
+  }
+
+
+
+#######################################################
+MyxyplotBin <- function(Z, MyV, NameY1) {
+  AllX  <- as.vector(as.matrix(Z[,MyV]))
+  AllY  <- rep(Z[,NameY1] , length(MyV))
+  AllID <- rep(MyV, each = nrow(Z))
+  
+  
+  library(mgcv)
+  library(lattice)
+  
+  P <- xyplot(AllY ~ AllX | factor(AllID), col = 1,
+              strip = function(bg='white', ...) strip.default(bg='white', ...),
+              scales = list(alternating = T, 
+                            x = list(relation = "free"),
+                            y = list(relation = "same")),
+              xlab = "Covariate",
+              ylab = "Probability of presence",
+              panel=function(x,y){
+                panel.grid(h=-1, v= 2)
+                panel.points(x,y,col=1)
+                tmp<-gam(y~s(x, k = 4), family = binomial)
+                MyData <- data.frame(x = seq(min(x), max(x), length = 25))
+                p1 <- predict(tmp, newdata = MyData, type ="response")
+                panel.lines(MyData$x,p1, col = 1, lwd = 3)
+              })
+  
+  print(P)
+}
+#######################################################
+
+#######################################################
+Myxyplot <- function(Z, MyV, NameY1,MyYlab="") {
+  AllX  <- as.vector(as.matrix(Z[,MyV]))
+  AllY  <- rep(Z[,NameY1] , length(MyV))
+  AllID <- rep(MyV, each = nrow(Z))
+  
+  
+  library(mgcv)
+  library(lattice)
+  
+  P <- xyplot(AllY ~ AllX|factor(AllID), col = 1,
+              xlab = list("Explanatory variables", cex = 1.5),
+              #ylab = list("Response variable", cex = 1.5),
+              #ylab = list("Pearson residuals", cex = 1.5),
+              ylab = list(MyYlab, cex = 1.5),
+              #layout = c(2,2),   #Modify
+              strip = function(bg='white', ...)
+                strip.default(bg='white', ...),
+              scales = list(alternating = T,
+                            x = list(relation = "free"),
+                            y = list(relation = "same")),
+              panel=function(x, y){
+                panel.grid(h=-1, v= 2)
+                panel.points(x, y, col = 1)
+                panel.loess(x, y, span = 0.8,col = 1, lwd = 2)})
+  
+  print(P)
+}
+#######################################################
+
+MyxyplotPolygon <- function(Z, MyV, NameY1) {
+  AllX  <- as.vector(as.matrix(Z[,MyV]))
+  AllY  <- rep(Z[,NameY1] , length(MyV))
+  AllID <- rep(MyV, each = nrow(Z))
+  
+  
+  library(mgcv)
+  library(lattice)
+  Z <- xyplot(AllY ~ AllX|factor(AllID), col = 1,
+              xlab = list(label = "Explanatory variables", cex = 1.5),
+              ylab = "",
+              strip = function(bg='white',cex.lab = 1.5,...)
+                strip.default(bg='white', ...),
+              scales = list(alternating = T,
+                            x = list(relation = "free"),
+                            y = list(relation = "same")),
+              panel=function(x, y){
+                t1 <- gam(y~s(x))
+                MD1 <- data.frame(x=seq(from = min(x, na.rm = TRUE),
+                                        to = max(x, na.rm = TRUE),
+                                        length = 100))
+                P1 <- predict(t1,   se.fit = TRUE)
+                I1 <- order(x)
+                xs <- sort(x)
+                panel.lines(xs, P1$fit[I1], col = 1)
+                panel.polygon(c(xs, rev(xs)),
+                              c(P1$fit[I1]-2*P1$se.fit[I1],
+                                rev(P1$fit[I1]+2*P1$se.fit[I1])),
+                              col = gray(0.7),
+                              density = 10 )
+                panel.grid(h=-1, v= 2)
+                panel.abline(0,0)
+                panel.points(x, y, col = 1)
+                
+              })
+  #Because the xyplot is inside a function you need to print 
+  #construction below
+  print(Z)
+}
+
+################################################
+#Mypairs
+#Make fancy pair plots
+Mypairs <- function(Z) {
+  MyVarx <- colnames(Z)
+  pairs(Z, labels = MyVarx,
+      cex.labels =  2,
+      lower.panel = function(x, y, digits=2, prefix="", cex.cor = 7) {
+        panel.cor(x, y, digits, prefix, cex.cor)}, 
+      upper.panel =  function(x, y) points(x, y, 
+                                           pch = 16, cex = 0.8, 
+                                           col = gray(0.1)))
+ #print(P)
+}
+```
+
+
+\section{Introduction}
+
+
+
+Here, we test whether the processes that drive aggregation differ between a neutralistic  and parasitic host-symbiont system. We further test how the tolerance linked sex and exposure linked size differences of guppy (\textit{Poecilia reticulata}) hosts can drive differences in the aggregation of \textit{Gyrodactylus} spp. parasites among their hosts. 
+
+For the Limpet-barnacle part of the analysis, we are using the unpublished data set limpetbarnacle.csv. This file  contains the following variables:
+ 
+ \textbf{Site}: A factor that identifies the site where the community was collected. \newline
+ \textbf{QUADRAT}: A factor that identifies the quadrat site location of each community of limpets and barnacles. It has a level per community. \newline
+ \textbf{H}: The total number of limpet hosts in each community \newline
+ \textbf{P}: The total number of barnacle symbionts in each community \newline
+ \textbf{MeanP}: The mean abundance of barnacles living on the limpets for each community. \newline
+ \textbf{varP}: The variance in abundance of barnacles living on the limpets for each population. \newline
+ \textbf{MeanW}: The mean width measurement for the limpets in each community. Measured in ($millimeters$) \newline
+ \textbf{VarW}: The variance in width measurement for the limpets in each community. Measured in ($millimeters^{2}$) \newline
+ \textbf{MeanL}: The mean length measurement for the limpets in each community. Measured in ($millimeters$) \newline
+ \textbf{VarL}: The variance in length measurement for the limpets in each community. Measured in ($millimeters^{2}$) \newline
+ \textbf{fs var log med}: The log median variance predicted by the feasible set for each limpet-barnacle community.\newline
+ 
+ For the guppy-Gyrodactlid portion of the manuscript we are using the guppygyro.csv dataset. This data is a combination of population level data from Stephenson, J. F., Oosterhout, C. van, Mohammed, R. S. & Cable, J. Parasites of Trinidadian guppies: evidence for sex- and age-specific trait-mediated indirect effects of predators. Ecology 96, 489–498 (2015) and an additional, unpublished data set which contains the following variables:
+
+\textbf{Site}: A factor that identifies the drainage, river, course, site, and year the population data was taken. It has a level per population. \newline
+\textbf{drainage}: The drainage where the population was collected from. Six levels \newline
+\textbf{river}: The river where the population was collected from. 13 levels.  \newline
+\textbf{year}: The year the population was collected in. 5 levels. \newline
+\textbf{season}: The season the population was collected. 2 levels. \newline
+\textbf{Course}: The watercourse the population was collected in. 2 levels. Upper indicates low predation populations while lower indicates high predation populations in line with previous publications from the  Trinidadian guppy system \newline
+\textbf{H}: The total number of hosts in the population \newline
+\textbf{P}: The total number of parasites in the population \newline
+\textbf{MeanP}: The mean number of parasites infecting hosts in the population \newline
+\textbf{VarP}: The mean number of parasites infecting hosts in the population \newline
+\textbf{MeanLen}: The mean length of all individuals in the population ($millimeters$) \newline
+\textbf{VarLen}: The variance in length of the population ($millimeters^{2}$) \newline
+\textbf{MeanW}: The mean weight of all individuals in the population ($grams$) \newline
+\textbf{VarW}: The variance in weight of the population ($grams^{2}$) \newline
+\textbf{fs var log med}: The log median variance predicted by the feasible set. \newline 
+\textbf{sex}: The sex of individuals in the population. Populations were separated into males and females to conduct each analysis and calculate body condition. This allowed us to better understand aggregation differences between sexes. 2 levels. \newline
+\textbf{jonvar}: The variation in condition of individuals in the population \newline
+\textbf{ResBC}: The body condition given the residual mass index.  \newline
+\textbf{jonres}: The residual of a regression between the body condition given by index from Johnson et al. 2011 and the mean length of the population. We did this to control for any body condition bias we may see between populations just due to size differences.  \newline
+\textbf{diffvar}: The difference in variances between the observed and expected distribution (the feasible set) of parasites in the population. Positive values indicates the population has a higher variance (More aggregation) than expected by the feasible set, negative values means the feasible set predicted more variance than is present in the observed data \newline
+\textbf{logMean}: The log10 mean of parasites in the population. \newline
+\textbf{jonresRS}: The scaled jonres variable from above.  \newline
+\textbf{MeanLenRS}: The scaled mean length variable from above. \newline
+\textbf{ExpPrev}: The expected prevalence of the population given by the feasible set \newline
+\textbf{ObsPrev}: The observed prevalence of the population \newline
+\textbf{MaxF}: The expected number of parasites on the individual with the highest parasite burden in the population given by the feasible set \newline
+\textbf{MaxE}: The observed number of parasites on the individual with the highest parasite burden in the population \newline
+
+
+We additionally have a separate CSV file named "guppysexescorr.csv." This dataset is just a subset of the larger guppy dataset to test for correlations between the aggregation of parasites between males and female guppies from the same site. 
+
+\subsection{Load necessary packages and data}
+
+```{r packages and loading in dataset,  warning=FALSE, message=FALSE}
+#Clear the working environment
+rm(list=ls())
+
+#Load in the necessary packages
+library(plyr)
+library(secr)
+library(lmtest)
+library(ggplot2)
+library(DHARMa)
+library(tidyverse)
+library(car)
+library(glmmTMB)
+library(lme4)
+require(visreg)
+require(arm)
+library(readr)
+library(performance)
+source("HighstatLibV6.R")
+library(viridis)
+library(RColorBrewer)
+require(simr)
+library(r2glmm)
+library(gridExtra)
+
+
+#dataframe containing all the data for the Guppy-gyrodactylus portion of the manuscript
+FS_trin <- read.csv("guppygyro.csv") 
+#dataframe containing all the data for the Limpet-Barnacle portion of the analysis
+Limp<-read.csv("limpetbarnacle.csv")
+Limp$fs_var_log_med<-as.numeric(Limp$fs_var_log_med)
+Limp<-subset(Limp, fs_var_log_med > -Inf)
+Limp<-subset(Limp, H > 4 & P > 5)
+summary(Limp)
+
+FeasCorr <- read.csv("guppysexescorr.csv")
+```
+ 
+
+\subsubsection {Setting variables as factors and calculating important metrics}
+
+```{r Setting up some variables, include=TRUE,  warning=FALSE, message=FALSE}
+
+#Setting factors as factors
+#setting each factor as a sum contrast to make interpretation easier. 
+FS_trin$Site <- stats::C(base::factor(FS_trin$Site), sum) 
+FS_trin$Course <-  stats::C(base::factor(FS_trin$Course), sum)
+FS_trin$sex <-  stats::C(base::factor(FS_trin$sex), sum)
+
+
+#Calculating the difference in the Observed prevalence in each each population with that predicted by the feasible set
+FS_trin$DiffPrev<-FS_trin$ObsPrev - FS_trin$ExpPrev 
+
+#Calculating the ratio of max parasite burden between the feasible set and the observed data
+FS_trin$DiffPRatio<-FS_trin$MaxE/FS_trin$MaxF
+#Calculating the difference in variance between the observed distributions and that of the feasible set for the Limpets
+Limp$diffvar<-log10(Limp$varP)-Limp$fs_var_log_med
+#Categorical factor for plotting
+Limp$L<-"Limpets" 
+
+#Creating the Variance in length regression by sex and extracting the residuals
+FS_trin$VarLenR<-residuals(lm(VarLen~sex, FS_trin))
+
+#Scaling and Centering
+FS_trin$jonvarRS<-as.numeric(scale(FS_trin$jonvar))
+FS_trin$logMeanRS<-as.numeric(scale(FS_trin$logMean))
+FS_trin$MeanLenRS<-as.numeric(scale(FS_trin$MeanLen))
+FS_trin$VarLenRS<-as.numeric(scale(FS_trin$VarLenR))
+FS_trin$jonresRS<-as.numeric(scale(FS_trin$jonres))
+
+```
+
+\section {The feasible set accurately predicts the aggregation of neutralist barnacle on their limpet hosts}
+
+\subsection{The difference in variance between the observed and feasible set of barnacles among limpets does not significantly differ from zero}
+
+\subsubsection{One-Sample T-test for Limpet-barnacles}
+```{r Limpets t-test diffvar from zero,warning=FALSE, message=FALSE,  warning=FALSE, message=FALSE }
+#conducting a one sample t-test to see if the difference in variance between the observed distribution of barnacles on limpets and that which is predicted by the feasible set are not different from zero
+ttestLimpetsDiffvar<-t.test(Limp$diffvar)
+# Printing the results for the t-test
+ttestLimpetsDiffvar 
+
+
+```
+
+\subsubsection{Visually inspecting this pattern}
+```{r Limpets t-test diffvar from zero graph,warning=FALSE, message=FALSE,  warning=FALSE, message=FALSE }
+
+#Visual plot showing a boxplot and jittered points of the difference in variance values for Limpets
+ggplot(Limp, aes(y=diffvar, x=L))+geom_boxplot(aes(), fill="light blue", width=0.5)+theme_classic()+geom_hline(yintercept=0)+xlab(" ")+ylab("Difference in variance (Obs.-Exp.)")+geom_jitter(color="grey33")
+
+```
+
+\subsection{Aggregation in the limpet-barnacle system decreases with mean length but increases with variance in length}
+
+\subsubsection{Checking for collinearity and non-linear relationships}
+```{r Limpet collin,warning=FALSE, message=FALSE,  warning=FALSE, message=FALSE}
+pairs(~diffvar+VarW+MeanW+MeanL+VarL, lower.panel=panel.smooth, diag.panel=panel.hist, 
+upper.panel=panel.cor, data=Limp)
+
+```
+
+\subsubsection{Developing the limpet aggregation model}
+
+We will use a linear mixed model to analyze how aggregation differs between populations and what factors are important for it in the limpet barnacle system. Site is included as a random term to allow for non-independence of populations taken from the same site.
+
+* Deterministic
+ + $DVL_{det}$ = a + $b_{1}$VarW + $b_{2}$VarL + $b_{3}$MeanL + $a_{i}$
+
+* Stochastic
+  + DVL ~ *N*($DVL_{det}$, $\sigma^{2}$) 
+  + $a_{i}$ ~ *N*(0, $\sigma^{2}_{Site}$) 
+  
+* Fixed
+  + VarW
+  + VarL
+  +  MeanL 
+* Random
+  + Site
+  
+\subsubsection{Fitting the limpet aggregation model}
+```{r Limpet modelfit,warning=FALSE, message=FALSE,  warning=FALSE, message=FALSE}
+Limpmod<-lmer(diffvar~VarW+VarL+MeanL+(1|Site), Limp)
+summary(Limpmod)
+
+```
+
+\subsubsection {Model validation for the limpet aggregation model}
+
+```{r residual plots,  warning=FALSE, message=FALSE,  warning=FALSE, message=FALSE}
+sim_residuals_DiffvarL <-simulateResiduals(Limpmod, 1000)  #Quantile residuals
+plot(sim_residuals_DiffvarL) 
+testDispersion(sim_residuals_DiffvarL)
+
+check_model(Limpmod, check=c("qq","normality", "homogeneity"))
+#Residuals against the variables in the model. Excluded for space but they have been checked
+#plotResiduals(sim_residuals_DiffvarL, FS_trin$sex) #Residual plot against sex
+#plotResiduals(sim_residuals_DiffvarL, FS_trin$Course)#Residual plot against Course
+#plotResiduals(sim_residuals_DiffvarL, FS_trin$jonvarRS)#Residual plot against scaled jonvar
+#plotResiduals(sim_residuals_DiffvarL, FS_trin$jonresRS)#Residual plot against scaled jonres
+#plotResiduals(sim_residuals_DiffvarL, FS_trin$meanLenRS)#Residual plot against scaled mean length
+#plotResiduals(sim_residuals_DiffvarL, FS_trin$logmeanRS)#Residual plot against scaled log mean parasites
+
+```
+
+\subsubsection {ANOVA with Conditional F test with KR df for the limpet aggregation model}
+
+<!-- Here we are using an ANOVA with a Type II Conditional F with Kenward-Roger degrees of freedom test to calculate a p value to determine whether the factors we think are important are significant in explaining the variation in aggregation. -->
+
+```{r aggregation LRT,  warning=FALSE, message=FALSE,  warning=FALSE, message=FALSE}
+#Anova with a F test wiht KR correction for df
+AnovaLimpmodel<-Anova(Limpmod, Type=2, test.statistic="F")
+#Printing the results
+AnovaLimpmodel
+
+```
+
+\subsubsection {Important plots from the limpet aggregation model}
+```{r Limp MeanL aggregation plots,  warning=FALSE, message=FALSE,  warning=FALSE, message=FALSE, include=FALSE}
+VSL2<-visreg(Limpmod, "MeanL", scale="response", partial=TRUE, plot=FALSE)
+#annotate(geom="text", x=.5, y=.5, label="Parasites more aggregated than expected")+ annotate(geom="text", x=.5, y=-.7, label="Parasites less aggregated than expected")
+#Graph looking at the difference in variance between the sexes
+
+VSFL2<-VSL2$fit
+VSrsL2<-VSL2$res
+
+ggplot(VSrsL2, aes(MeanL, visregRes))+
+  geom_smooth(method="lm")+
+  geom_hline(yintercept=0,linetype="dashed")+
+  geom_jitter(data=VSrsL2, aes(MeanL, visregRes))+
+  xlab("Mean Length (mm)")+
+  ylab("Difference in Variance (Obs. - Exp.)")+
+  theme_classic()+
+  theme(axis.text=element_text(size=12),axis.title=element_text(size=14))+
+  theme(legend.position="none")
+
+#ggplot(VSF, aes(sex, visregFit, colour=sex))+geom_hline(yintercept=0,linetype="dashed")+xlab("Sex")+ylab("Difference in Variance (Obs. - Exp.)")+theme_classic()
+
+
+```
+
+
+```{r Limp VarL aggregation plots, warning=FALSE, message=FALSE, include=FALSE}
+VSL<-visreg(Limpmod, "VarL", scale="response", partial=TRUE, plot=FALSE)
+#annotate(geom="text", x=.5, y=.5, label="Parasites more aggregated than expected")+ annotate(geom="text", x=.5, y=-.7, label="Parasites less aggregated than expected")
+#Graph looking at the difference in variance between the sexes
+
+VSFL<-VSL$fit
+VSrsL<-VSL$res
+
+ggplot(VSrsL, aes(VarL, visregRes))+
+  geom_smooth(method="lm")+
+  geom_hline(yintercept=0,linetype="dashed")+
+  geom_jitter(data=VSrsL, aes(VarL, visregRes))+
+  xlab("Variance in Length (mm)")+
+  ylab("Difference in Variance (Obs. - Exp.)")+
+  theme_classic()+
+  theme(axis.text=element_text(size=12),axis.title=element_text(size=14))+
+  theme(legend.position="none")
+
+#ggplot(VSF, aes(sex, visregFit, colour=sex))+geom_hline(yintercept=0,linetype="dashed")+xlab("Sex")+ylab("Difference in Variance (Obs. - Exp.)")+theme_classic()
+
+```
+
+\section{The feasible set does not accurately predict the aggregation of \textit{Gyrodactylus}  spp.parasites among their guppy hosts}
+
+\subsection{\textit{Gyrodactylus} spp. are less aggregated on their guppy hosts than is to be expected given the feasible set.}
+\subsubsection{One-Sample T-test for guppy-gyrodactylid overall}
+```{r block for testing whether the diffvar for host parasite is diff from zero, warning=FALSE, message=FALSE}
+#t.test to test whetehr the difference in variance between observed and expected distribution of Gyrodactylid parasites on their hosts differs from zero
+ttestGuppiesAll<-t.test(FS_trin$diffvar)
+#Printing the results of the t-test
+ttestGuppiesAll
+
+
+```
+
+\subsubsection{Correlation test to ellucidate whether diffvar from sexes at the same site is correlated}
+```{r Guppy t-test diffvar from zero graph,warning=FALSE, message=FALSE,  warning=FALSE, include=FALSE}
+#Categorical factor for plotting
+FS_trin$G<-"Guppies"
+
+#Visual plot showing the boxplot and jittered points for the difference in variance for guppy populations
+ggplot(FS_trin, aes(G,diffvar))+
+  geom_boxplot( fill="light green", width=0.5)+ theme_classic()+
+  geom_hline(yintercept=0)+
+  xlab(" ")+
+  ylab("Difference in variance (Obs.-Exp.)")+
+  geom_jitter(width=0.4)
+
+```
+
+\subsubsection{Visually inspecting this pattern}
+
+```{r block for testing whether the diffvar is correlated between the sexes from the same site, warning=FALSE, message=FALSE}
+
+#Correlation test to test for the correlation in the aggregation of parasites among males and females from the same site
+cor.test(FeasCorr$FemaleDiff,FeasCorr$MaleDiff)
+```
+
+<!-- %\subsection{What about differences between the two sexes of guppies?} -->
+<!-- %\subsubsection{One-Sample T-test for guppy-gyrodactylid split by sex} -->
+```{r t-test for guppies sexes,  warning=FALSE, message=FALSE,  warning=FALSE,  include=FALSE}
+#t-test to test whether
+ttestdiffvarF<-t.test(FS_trin$diffvar[FS_trin$sex=="F"]) 
+#female difference in variance is significantly different than zero
+ttestdiffvarF
+
+#t-test to test whether
+ttestdiffvarM<-t.test(FS_trin$diffvar[FS_trin$sex=="M"]) 
+#male difference in variance is significantly different than zero
+ttestdiffvarM
+
+
+
+#Correlation test to test for the correlation in the aggregation of parasites among males and females from the same site
+cor.test(FeasCorr$FemaleDiff,FeasCorr$MaleDiff)
+
+
+```
+
+<!-- \subsubsection{Visually inspecting this pattern split by sex} -->
+```{r Guppy sexes t-test diffvar from zero graph,warning=FALSE, message=FALSE,  warning=FALSE, include=FALSE}
+#Setting sex color screen
+cbp1 <- c( "#E69F00", "#56B4E9")
+#+geom_boxplot(data=Limp, aes(L,diffvar), fill="light blue", width=0.5)+geom_jitter(data=Limp, aes(L,diffvar), width=0.4)
+ggplot(FS_trin, aes(sex,diffvar, fill=sex))+
+  geom_boxplot(width=0.5)+
+  theme_classic()+
+  geom_hline(yintercept=0)+
+  xlab(" ")+
+  ylab("Difference in variance (Obs.-Exp.)")+
+  geom_jitter()+
+  scale_fill_manual(values=cbp1)+
+  theme(legend.position = "none")
+
+```
+
+
+\section{The average length and host sex are important drivers of aggregation in the guppy-\textit{Gyrodactylus} spp. system}
+
+\subsection{\textit{Gyrodactylus} spp. aggregation decreases as mean length increases in guppy populations and is less aggregated among male than female guppies}
+
+\subsubsection{Visually inspect our data for correlations or non-linear relationships}
+```{r pairs plot2,  warning=FALSE, message=FALSE}
+pairs(~diffvar+sex+Course+VarLenR+jonres+MeanLen+
+logMean, lower.panel=panel.smooth, diag.panel=panel.hist, 
+upper.panel=panel.cor, data=FS_trin)
+
+```
+
+
+\subsubsection {Developing the \textit{Gyrodactylus} aggregation model}
+
+We used a linear mixed model to analyze how aggregation differs between populations and what factors are important for it. Site is included as a random term to allow for non-independence of female and male populations taken from the same site.
+
+* Deterministic
+ + $DV_{det}$ = a + $b_{1}$Course + $b_{2}$MeanLen + $b_{3}$Sex + $b_{4}$VarLenR + $b_{5}$jonres + $b_{6}$logMean + $a_{i}$
+
+* Stochastic
+  + DV ~ *N*($DV_{det}$, $\sigma^{2}$) 
+  + $a_{i}$ ~ *N*(0, $\sigma^{2}_{Site}$) 
+  
+* Fixed
+  + Course
+  + MeanLen
+  + Sex
+  + VarLenR - residuals from a regression of variance in length and sex
+  + Jonres 
+  + logMean 
+* Random
+  + Site
+  
+\subsubsection {Fitting the \textit{Gyrodactylus} Aggregation model}
+
+```{r linear model for aggregation,  warning=FALSE, message=FALSE,  warning=FALSE, message=FALSE}
+#fitting a linear mixed model with all the covariates we think are important for this analysis. 
+Aggmodel <- lmer(diffvar~sex+Course+jonresRS+VarLenRS+MeanLenRS+logMeanRS+(1|Site), data=FS_trin) 
+
+#Summary for the aggregation model
+summary(Aggmodel)
+
+
+```
+
+ 
+ 
+\subsubsection {Model validation for the \textit{Gyrodactylus} aggregation model}
+
+ 
+ 
+```{r agg vallidation plots,  warning=FALSE, message=FALSE,  warning=FALSE, message=FALSE}
+sim_residuals_Diffvar <-simulateResiduals(Aggmodel, 1000)  #Quantile residuals
+plot(sim_residuals_Diffvar) 
+testDispersion(sim_residuals_Diffvar)
+
+check_model(Aggmodel, check=c("qq","normality", "homogeneity"))
+#Residuals against the variables in the model. Excluded for space but they have been checked
+#plotResiduals(sim_residuals_Diffvar, FS_trin$sex) #Residual plot against sex
+#plotResiduals(sim_residuals_Diffvar, FS_trin$Course)#Residual plot against Course
+#plotResiduals(sim_residuals_Diffvar, FS_trin$jonvarRS)#Residual plot against scaled jonvar
+#plotResiduals(sim_residuals_Diffvar, FS_trin$jonresRS)#Residual plot against scaled jonres
+#plotResiduals(sim_residuals_Diffvar, FS_trin$meanLenRS)#Residual plot against scaled mean length
+#plotResiduals(sim_residuals_Diffvar, FS_trin$logmeanRS)#Residual plot against scaled log mean parasites
+
+
+```
+
+\subsubsection {ANOVA with Conditional F test with KR df for \textit{Gyrodactylus} aggregation model}
+
+<!-- Here we are using an ANOVA with a Type II Conditional F with Kenward-Roger degrees of freedom test to calculate a p value to determine whether the factors we think are important are significant in explaining the variation in aggregation. -->
+
+```{r aggregation F,  warning=FALSE, message=FALSE,  warning=FALSE, message=FALSE}
+#Anova with a F test wiht KR correction for df
+AnovaAggmodel<-Anova(Aggmodel, Type=2, test.statistic="F")
+#Printing the results
+AnovaAggmodel
+
+```
+<!-- % THIS WILL ALL MOVE TO THE DISCUSSION IN THE PAPER AND BE REMOVED FROM HERE -->
+
+<!-- % * We see that there is a significant correlation between difference in variance of  infection and three explanatory variables; sex, scaled mean length, and log mean parasite load.  -->
+<!-- %  + Our results suggest that there is a significant difference in the aggregation of parasites between the sexes. Our summary of the model shows that sex 1 (Females) has a positive slope suggesting that parasites are more aggregated among females in guppy populations.   -->
+<!-- %  + We also see a negative relationship between difference in variance and scaled mean length of the host population where populations with larger individuals have less parasite aggregation than is expected by the feasible set.  -->
+<!-- % + Lastly, we see that there is a positive relationship between difference in variance and scaled log mean parasite load where populations with higher log mean parasite burden have greater parasite aggregation than is expected by the feasible set. This pattern is fairly common in host-parasite aggregation studies where an increased log mean parasite burden usually has increased variance and aggregation.  -->
+
+```{r r t-test,  warning=FALSE, include=FALSE, message=FALSE,  warning=FALSE, message=FALSE }
+#Feas_Emp_2021Nov <- read_csv("~/Desktop/Projects/DataforGuppy-GyroAgg/Feas_Emp_2021Nov.csv")
+#df1<-subset(Feas_Emp_2021Nov, Site == "SantaCruz:SantaCruz:lower:Lower Santa Cruz:2020:F")
+
+#Sites<-unique(Feas_Emp_2021Nov$Site)
+#length(Sites)
+#Site<-vector(length=length(Sites))
+#pval<-vector(length=length(Sites))
+#df<-data.frame(Site,pval)
+
+#counter <- 1
+#for (i in Sites) {
+#  sub <- subset(Feas_Emp_2021Nov, Site == i)
+#  feas<-sub$Feas
+#  emp<-sub$Emp
+#  a<-ks.test(feas, emp)
+#  p <- a$p.value
+#  df$Site[counter]<-sub$Site
+#  df$p[counter]<-p
+#  counter = counter + 1
+#}
+
+```
+
+
+\subsubsection {Important plots from the \textit{Gyrodactylus} aggregation model}
+
+```{r aggregation plots,  warning=FALSE, message=FALSE,  warning=FALSE, message=FALSE, include=FALSE}
+VS<-visreg(Aggmodel, "sex", scale="response", partial=TRUE, plot=FALSE)
+#annotate(geom="text", x=.5, y=.5, label="Parasites more aggregated than expected")+ annotate(geom="text", x=.5, y=-.7, label="Parasites less aggregated than expected")
+#Graph looking at the difference in variance between the sexes
+cbp1 <- c( "#E69F00", "#56B4E9")
+VSF<-VS$fit
+VSrs<-VS$res
+
+ggplot(VSrs, aes(sex, visregRes, colour=sex))+
+  geom_boxplot()+
+  geom_hline(yintercept=0,linetype="dashed")+
+  geom_jitter(data=VSrs, aes(sex, visregRes))+
+  xlab("Sex")+
+  ylab("Difference in Variance (Obs. - Exp.)")+
+  theme_classic()+
+  scale_color_manual(values=cbp1)+
+  theme(axis.text=element_text(size=12),axis.title=element_text(size=14))+
+  theme(legend.position="none")
+
+#ggplot(VSF, aes(sex, visregFit, colour=sex))+geom_hline(yintercept=0,linetype="dashed")+xlab("Sex")+ylab("Difference in Variance (Obs. - Exp.)")+theme_classic()
+
+```
+
+```{r aggregation plot MeanLenRS,  warning=FALSE, message=FALSE, include=FALSE}
+VSDL<-visreg(Aggmodel, "MeanLenRS", scale="response",partial=TRUE, plot=F)
+
+VSDLf<-VSDL$fit
+VSDLr<-VSDL$res
+ggplot(VSDLr, aes(MeanLenRS, visregRes))+
+  geom_smooth(method="lm")+
+  geom_hline(yintercept=0,linetype="dashed")+
+  geom_jitter(data=VSDLr, aes(MeanLenRS, visregRes))+
+  xlab("Scaled Mean Length (mm)")+
+  ylab("Difference in Variance (Obs. - Exp.)")+
+  theme_classic()+
+  theme(axis.text=element_text(size=12),axis.title=element_text(size=14))
+
+```
+
+```{r aggregation plot logMeanrRS,  warning=FALSE, message=FALSE}
+
+VSLM<-visreg(Aggmodel, "logMeanRS", scale="response",  partial=TRUE, plot=F)
+
+VSLMf<-VSLM$fit
+VSLMr<-VSLM$res
+
+ggplot(data=VSLMr, aes(logMeanRS, visregRes))+
+  geom_smooth(data=VSLMr, aes(logMeanRS, visregRes), method="lm")+
+  geom_hline(yintercept=0,linetype="dashed")+
+  geom_jitter(data=VSLMr, aes(logMeanRS, visregRes))+
+  xlab("logMeanRS")+
+  ylab("Difference in Variance (Obs. - Exp.)")+
+  theme_classic()+
+  theme(axis.text=element_text(size=12),axis.title=element_text(size=14))
+```
+
+\subsection{Guppy populations have higher prevalences than the feasible set in populations with higher mean length}
+
+\subsubsection {Checking for collinearity and non-linear relationships}
+```{r Prev data visulazation,  warning=FALSE, message=FALSE}
+#Visual plot to examine collinearity and non-linear relationships for prevalence data
+pairs(~DiffPrev+sex+Course+
+ResBC+VarLenR+jonres+MeanLen+logMean, lower.panel=panel.smooth, 
+diag.panel=panel.hist, upper.panel=panel.cor, data=FS_trin)
+```
+
+<!-- We do not see any collinearity or non-linear relationships when looking at it with Difference in Prevalence. -->
+
+\subsubsection {Developing the Prevalence model}
+
+ We used a linear mixed model with a site random effect to account for non-independence between males and females at the same site: 
+
+* Deterministic
+ + $DP_{det}$ = a + $b_{1}$Course + $b_{2}$MeanLen + $b_{3}$Sex + $b_{4}$jonvar + $b_{5}$jonres + $b_{6}$logMean + $a_{i}$
+
+* Stochastic
+  + DP ~ *N*($DP_{det}$, $\sigma^{2}$) 
+  + $a_{i}$ ~ *N*(0, $\sigma^{2}_{Site}$) 
+
+  
+* Fixed
+  + Course
+  + MeanLen
+  + Sex
+  + VarLenR 
+  + Jonres 
+  + logMean 
+* Random
+  + Site
+
+\subsubsection {Fitting the Prevalence model}
+```{r linear model for prevalence,  warning=FALSE, message=FALSE,  warning=FALSE, message=FALSE}
+#linear mixed model with all predictors
+modelPrev <- lmer(DiffPrev~sex+Course+jonresRS+VarLenRS+MeanLenRS+logMeanRS+(1|Site), data=FS_trin) 
+
+#Summary for prevalence model output
+summary(modelPrev)
+
+```
+
+\subsubsection {Model validation for the Prevalence model}
+
+```{r residual plots prev,  warning=FALSE, message=FALSE}
+#Quantile residuals
+sim_residuals_Diffprev <-simulateResiduals(modelPrev, 1000)  
+plot(sim_residuals_Diffprev) 
+testDispersion(sim_residuals_Diffprev)
+
+check_model(modelPrev, check=c("qq","normality","homogeneity"))
+
+
+#Residuals against the variables in the model. Excluded for space but they have been checked and code is included to facilitate exploring them
+#plotResiduals(sim_residuals_Diffprev, FS_trin$sex) #Residual plot against sex
+#plotResiduals(sim_residuals_Diffprev, FS_trin$Course)#Residual plot against Course
+#plotResiduals(sim_residuals_Diffprev, FS_trin$jonvarRS)#Residual plot against scaled jonvar
+#plotResiduals(sim_residuals_Diffprev, FS_trin$jonresRS)#Residual plot against scaled jonres
+#plotResiduals(sim_residuals_Diffprev, FS_trin$meanLenRS)#Residual plot against scaled mean length
+#plotResiduals(sim_residuals_Diffprev, FS_trin$logmeanRS)#Residual plot against scaled log mean parasites
+
+
+```
+
+<!-- All model validation plots are looking really good. I do not see anything concerning.  -->
+
+\subsubsection {ANOVA with Conditional F test with Kenward-Roger df for significance in Prevalence model}
+
+```{r prev likelihood ratio tests,  warning=FALSE, message=FALSE,  warning=FALSE, message=FALSE}
+#Anova to run F test with KR correciton for df
+AnovamodelPrev<-Anova(modelPrev, type=2, test.statistic="F")
+#Printing the results
+AnovamodelPrev
+
+
+```
+
+\subsubsection{Both males and females have higher prevalences than the feasible set}
+\subsubsection{One-sample t-test for both sexes}
+
+```{r prevalence sexes t-test,  warning=FALSE, message=FALSE,  warning=FALSE, message=FALSE}
+#One way t-test to test whether the number of infected individuals is significantly different than zero
+ttestprevf<-t.test(FS_trin$DiffPrev[FS_trin$sex == "F"]) 
+#Printing the results
+ttestprevf
+
+#One way t-test to test whether the number of infected individuals is significantly different than zero
+ttestprevm<-t.test(FS_trin$DiffPrev[FS_trin$sex == "M"])
+#Printing teh results
+ttestprevm
+
+
+```
+
+
+
+<!-- MOVE THIS TO THE DISCUSSION -->
+<!-- * We see that there is a marginally significant correlation between Difference in prevalence and scaled mean length.  -->
+<!--   + This relationship is positive indicating that those populations with higher mean length also have more infected individuals than is expected given random chance (the feasible set).  -->
+
+\subsubsection {Important plots from the prevalence model}
+
+```{r prev plots,  warning=FALSE, message=FALSE,  warning=FALSE, message=FALSE, include=FALSE}
+
+VSP<-visreg(modelPrev, "MeanLenRS", scale="response",  ylab="Difference in Prevalence", xlab="Mean Length in the population (mm)",partial=TRUE, plot=F)
+#+ annotate(geom="text", x=-2, y=.26, label="Higher prevalence than expected")+ annotate(geom="text", x=-2, y=-.2, label="Lower prevalence than expected")#Graph looking at the difference in prev with mean length
+VSPm<-VSP$fit
+VSPpr<-VSP$res
+
+ggplot(VSPpr, aes(MeanLenRS, visregRes))+
+  theme_classic()+
+  geom_smooth(method="lm")+
+  geom_jitter(data=VSPpr, aes(MeanLenRS, visregRes))+
+  xlab("Scaled Mean Length")+
+  ylab("Difference in Prevalence (Obs. - Exp.)")+
+  geom_hline(yintercept=0)+
+  theme(axis.text=element_text(size=12),axis.title=element_text(size=14))
+
+```
+
+```{r prev plots sex,  warning=FALSE, message=FALSE,  warning=FALSE, include=FALSE}
+VSP2<-visreg(modelPrev, "sex",  scale="response",partial=TRUE, plot=F)
+#+ annotate(geom="text", x=-2, y=.26, label="Higher prevalence than expected")+ annotate(geom="text", x=-2, y=-.2, label="Lower prevalence than expected")#Graph looking at the difference in prev with mean length
+VSPm2<-VSP2$fit
+VSPpr2<-VSP2$res
+
+ggplot(VSPpr2, aes(sex, visregRes,))+
+  theme_classic()+
+  geom_boxplot(aes(color=sex))+
+  geom_jitter(data=VSPpr2, aes(sex, visregRes, color=sex))+
+  xlab("Sex")+
+  ylab("Difference in Prevalence (Obs. - Exp.)")+
+  geom_hline(yintercept=0)+
+  scale_color_manual(values=cbp1)+
+  theme(axis.text=element_text(size=12),axis.title=element_text(size=14))+
+  theme(legend.position="none")
+
+```
+\subsection{Populations with larger guppy individuals have less parasites on the heaviest infected individual and male guppies have less parasites on their heaviest infected host than the feasible set}
+
+\subsubsection{Checking for collinearity and non-linear relationships}
+
+```{r MaxInt data visulazation,  warning=FALSE, message=FALSE,  warning=FALSE, message=FALSE}
+#Looking at collinearity and non-linear relationships for Parasite ratio
+pairs(~log10(DiffPRatio)+sex+Course+VarLenR+jonres+MeanLen+logMean, lower.panel=panel.smooth, 
+diag.panel=panel.hist, upper.panel=panel.cor, data=FS_trin)
+```
+
+
+\subsubsection{Developing the log ratio of max intensity model}
+
+We used a linear mixed model with a site random effect to account for non-independence between males and females at the same site: 
+
+* Deterministic
+ + $Log_{10}$($DP_{det}$) = a + $b_{1}$Course + $b_{2}$MeanLen + $b_{3}$Sex + $b_{4}$VarLenR + $b_{5}$jonres + $b_{6}$logMean + $a_{i}$
+
+* Stochastic
+  + $Log_{10}$(DP) ~ *N*($Log_10$($DP_{det}$), $\sigma^{2}$) 
+  + $a_{i}$ ~ *N*(0, $\sigma^{2}_{Site}$) 
+
+  
+* Fixed
+  + Course
+  + MeanLen
+  + Sex
+  + VarLenR - residual from a linear regression of variance in length and sex
+  + Jonres - residual from a linear regression of body condition and mean length
+  + logMean - log mean parasites
+* Random
+  + Site
+  
+\subsubsection {Fitting the ratio of log max intensity model}
+
+```{r maxP new model with new distribution,  warning=FALSE, message=FALSE,  warning=FALSE, message=FALSE}
+#Linear mixed model to examine which variables are important for parasite ratio
+LMaxInt<-lmer(log10(DiffPRatio)~sex+Course+VarLenRS+jonresRS+logMeanRS+MeanLenRS+(1|Site), data=FS_trin)
+
+#Printing the summary results
+summary(LMaxInt)
+
+```
+
+\subsubsection {Model validation for the log ratio of max intensity model}
+
+```{r residual plots MaxInt,  warning=FALSE, message=FALSE,  warning=FALSE, message=FALSE}
+sim_residuals_LMaxInt <-simulateResiduals(LMaxInt, 1000)  #Quantile residuals
+plot(sim_residuals_LMaxInt) 
+testDispersion(sim_residuals_LMaxInt)
+
+check_model(LMaxInt, check=c("qq","normality","homogeneity"))
+
+
+#Residuals against the variables in the model. Excluded for space but they have been checked and code is included to facilitate exploring them
+#plotResiduals(sim_residuals_LMaxInt, FS_trin$sex) #Residual plot against sex
+#plotResiduals(sim_residuals_LMaxInt, FS_trin$Course)#Residual plot against Course
+#plotResiduals(sim_residuals_LMaxInt, FS_trin$jonvarRS)#Residual plot against scaled jonvar
+#plotResiduals(sim_residuals_LMaxInt, FS_trin$jonresRS)#Residual plot against scaled jonres
+#plotResiduals(sim_residuals_LMaxInt, FS_trin$meanLenRS)#Residual plot against scaled mean length
+#plotResiduals(sim_residuals_LMaxInt, FS_trin$logmeanRS)#Residual plot against scaled log mean parasites
+
+
+```
+
+\subsubsection {ANOVA with Conditional F test with Kenward-Roger df for significance in log ratio of max intensity model}
+
+```{r MaxInt F cond. tests,  warning=FALSE, message=FALSE,  warning=FALSE, message=FALSE}
+#Anova with Conditional F test with KR correction for df
+Anova(LMaxInt, type=2, test.statistic="F")
+```
+
+\subsubsection {Important plots from the log ratio of max intensity model}
+
+```{r MaxInt sex plots,  warning=FALSE, message=FALSE,  warning=FALSE, message=FALSE, include=FALSE}
+VSMP<-visreg(LMaxInt, "sex", partial=T, scale="response", plot=F)
+
+VSMPf<-VSMP$fit
+VSMPr<-VSMP$res
+
+ggplot(VSMPr, aes(sex, visregRes, color=sex))+
+  geom_boxplot()+
+  geom_jitter(data=VSMPr, aes(sex,visregRes))+
+  xlab("Sex")+
+  ylab("Log Ratio of Max parasite  (Obs./ Exp.)")+
+  geom_hline(yintercept=0)+
+  scale_color_manual(values=cbp1)+
+  theme_classic()+
+  theme(axis.text=element_text(size=12),axis.title=element_text(size=14))+
+  theme(legend.position="none")
+```
+
+```{r MaxInt MeanLen plots, warning=FALSE, message=FALSE,  warning=FALSE, message=FALSE, include=FALSE}
+
+VRML<-visreg(LMaxInt, "MeanLenRS", partial=T, scale="response",  ylab="log ratio of max parasite burden", xlab="MeanLenRS", plot=F)
+
+VRMLf<-VRML$fit
+VRMLr<-VRML$res
+
+ggplot(VRMLr, aes(MeanLenRS, visregRes))+
+  geom_smooth(method="lm")+
+  geom_jitter(data=VRMLr, aes(MeanLenRS,visregRes))+
+  xlab("Scaled Mean Length (mm)")+
+  ylab("Log Ratio of Max parasite  (Obs./ Exp.)")+
+  geom_hline(yintercept=0)+scale_color_manual(values=cbp1)+
+  theme_classic()+
+  theme(axis.text=element_text(size=12),axis.title=element_text(size=14))
+```
+
+```{r MaxInt logMean plots1, include=FALSE,  warning=FALSE, message=FALSE}
+VSMPLM<-visreg(LMaxInt, "logMeanRS", partial=T, scale="response", plot=F)
+
+VSMPLMf<-VSMP$fit
+VSMPLMr<-VSMP$res
+
+ggplot(VSMPLMf, aes(logMeanRS, visregFit, color=sex))+
+  geom_smooth(method="lm")+
+  geom_jitter(data=VSMPLMr, aes(logMeanRS,visregRes))+
+  xlab("Scaled log mean parasite burden")+
+  ylab("Log Ratio of Max parasite  (Obs./ Exp.)")+
+  geom_hline(yintercept=0)+
+  scale_color_manual(values=cbp1)+
+  theme_classic()+
+  theme(axis.text=element_text(size=12), axis.title=element_text(size=14))+
+  theme(legend.position="none")
+```
+
+
+\subsubsection{The log ratio of parasite burden on the heaviest infected host is significantly different from zero for male guppies but not female guppies}
+\subsubsection{One-sample t-test for both males and females log ratio of max parasite burden}
+```{r MaxInt both sex t-test,  warning=FALSE, message=FALSE,  warning=FALSE, message=FALSE}
+#t-test to test whether the log max parasite ratio in females is significantly different than zero
+t.test(log10(FS_trin$DiffPRatio[FS_trin$sex == "F"])) 
+#t-test to test whetehr the log max parasite ratio in males is significantly different than zero
+t.test(log10(FS_trin$DiffPRatio[FS_trin$sex == "M"])) 
+```
